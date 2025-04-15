@@ -1,91 +1,138 @@
 package vue.patient;
 
+import dao.UtilisateurDAO;
 import controleur.ControleurHistorique;
-import controleur.ControleurRendezVous;
 import modele.RendezVous;
 import modele.Utilisateur;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * Panel affichant l'historique des rendez-vous du patient connecté.
+ *
+ * <p>Présente un tableau avec les détails de chaque rendez-vous,
+ * incluant le statut, la note et une action pour noter les rendez-vous passés.</p>
+ *
+ * @author Nicolas <nicolas.chaudemanche1@gmail.com>
+ */
 public class HistoriquePatientPanel extends JPanel {
+
+    /**
+     * Constructeur qui initialise l'interface d'historique.
+     *
+     * @param fenetre la fenêtre principale de l'application
+     * @param patient l'utilisateur patient connecté
+     */
     public HistoriquePatientPanel(JFrame fenetre, Utilisateur patient) {
+        // layout principal et fond clair
         setLayout(new BorderLayout());
         setBackground(Color.decode("#f5f7fb"));
 
+        // header avec infos patient
         add(new HeaderPatient(patient), BorderLayout.NORTH);
 
-        JPanel centre = new JPanel(new BorderLayout());
-        centre.setBackground(Color.WHITE);
-        centre.setBorder(BorderFactory.createEmptyBorder(20, 40, 20, 40));
+        // panneau central blanc
+        JPanel panneauCentral = new JPanel(new BorderLayout(10, 10));
+        panneauCentral.setBackground(Color.WHITE);
+        panneauCentral.setBorder(BorderFactory.createEmptyBorder(20, 40, 20, 40));
 
-        String[] colonnes = {"Date", "Spécialiste", "Motif", "Statut", "Note", "Action"};
-        DefaultTableModel modeleTable = new DefaultTableModel(colonnes, 0) {
-            public boolean isCellEditable(int row, int column) { return false; }
+        // définition des colonnes
+        String[] entetes = {
+                "Date", "Spécialiste", "Email", "Téléphone", "Adresse",
+                "Spécialité", "Motif", "Statut", "Note", "Action"
         };
-        JTable table = new JTable(modeleTable);
-        table.setRowHeight(35);
-        table.setFont(new Font("Arial", Font.PLAIN, 14));
-        table.getTableHeader().setFont(new Font("Arial", Font.BOLD, 14));
+        DefaultTableModel modeleTableau = new DefaultTableModel(entetes, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false; // pas d’édition directe
+            }
+        };
+        JTable tableau = new JTable(modeleTableau);
+        tableau.setRowHeight(35);
+        tableau.setFont(new Font("Arial", Font.PLAIN, 14));
+        tableau.getTableHeader().setFont(new Font("Arial", Font.BOLD, 14));
 
-        JScrollPane scroll = new JScrollPane(table);
+        // remplissage du tableau
+        List<RendezVous> historique = ControleurHistorique.getHistorique(patient.getId());
+        for (RendezVous rdv : historique) {
+            Utilisateur spec = UtilisateurDAO.getUtilisateurParId(rdv.getIdSpecialiste());
+            String nomSpec   = spec != null ? spec.getPrenom() + " " + spec.getNom() : "[inconnu]";
+            String emailSpec = spec != null ? spec.getEmail() : "";
+            String telSpec   = spec != null ? spec.getTelephone() : "";
+            String adrSpec   = spec != null ? spec.getAdresse() : "";
+            String speSpec   = spec != null ? spec.getSpecialite() : "";
 
-        ArrayList<RendezVous> rdvs = ControleurHistorique.getHistorique(patient.getId());
-        for (RendezVous r : rdvs) {
-            String statut = r.getDateHeure().isBefore(LocalDateTime.now()) ? "Passé" : "À venir";
-            String note = r.getNote() > 0 ? r.getNote() + " ⭐" : "Non noté";
-            String action = (r.getNote() == 0 && statut.equals("Passé")) ? "Noter" : "";
-            modeleTable.addRow(new Object[]{r.getDateHeure(), r.getIdSpecialiste(), r.getMotif(), statut, note, action});
+            String statut = rdv.getDateHeure().isBefore(LocalDateTime.now()) ? "Passé" : "À venir";
+            String note   = rdv.getNote() > 0 ? rdv.getNote() + " ⭐" : "Non noté";
+            String action = rdv.getNote() == 0 && statut.equals("Passé") ? "Noter" : "";
+
+            modeleTableau.addRow(new Object[]{
+                    rdv.getDateHeure(), nomSpec, emailSpec, telSpec, adrSpec, speSpec,
+                    rdv.getMotif(), statut, note, action
+            });
         }
 
-        table.addMouseListener(new java.awt.event.MouseAdapter() {
-            public void mouseClicked(java.awt.event.MouseEvent evt) {
-                int row = table.rowAtPoint(evt.getPoint());
-                int col = table.columnAtPoint(evt.getPoint());
-                if (col == 5 && table.getValueAt(row, col).equals("Noter")) {
-                    String date = table.getValueAt(row, 0).toString();
-                    int idSpec = Integer.parseInt(table.getValueAt(row, 1).toString());
-                    int note = demanderNote();
-                    if (note > 0) {
-                        ControleurRendezVous.noterRendezVous(patient.getId(), date, idSpec, note);
-                        table.setValueAt(note + " ⭐", row, 4);
-                        table.setValueAt("✔", row, 5);
-                    }
+        // scroll du tableau
+        JScrollPane defileur = new JScrollPane(tableau);
+        defileur.setBorder(null);
+        panneauCentral.add(defileur, BorderLayout.CENTER);
+
+        // barre de recherche
+        JPanel panneauRecherche = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        panneauRecherche.setBackground(Color.WHITE);
+        panneauRecherche.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
+        JLabel etiquetteRecherche = new JLabel("Recherche : ");
+        JTextField champRecherche = new JTextField(20);
+        panneauRecherche.add(etiquetteRecherche);
+        panneauRecherche.add(champRecherche);
+        panneauCentral.add(panneauRecherche, BorderLayout.SOUTH);
+
+        // filtrage dynamique
+        TableRowSorter<DefaultTableModel> trieur = new TableRowSorter<>(modeleTableau);
+        tableau.setRowSorter(trieur);
+        champRecherche.getDocument().addDocumentListener(new DocumentListener() {
+            private void majFiltre() {
+                String texte = champRecherche.getText();
+                if (texte.trim().isEmpty()) {
+                    trieur.setRowFilter(null);
+                } else {
+                    trieur.setRowFilter(RowFilter.regexFilter("(?i)" + texte));
                 }
             }
+            @Override public void insertUpdate(DocumentEvent e) { majFiltre(); }
+            @Override public void removeUpdate(DocumentEvent e) { majFiltre(); }
+            @Override public void changedUpdate(DocumentEvent e) { majFiltre(); }
         });
 
-        centre.add(scroll, BorderLayout.CENTER);
-        add(centre, BorderLayout.CENTER);
-
-        JButton retour = new JButton("⬅ Retour au tableau de bord");
-        retour.addActionListener(e -> {
-            fenetre.setContentPane(new TableauDeBordPatient(fenetre, patient));
-            fenetre.revalidate();
-            fenetre.repaint();
-        });
-
-        JPanel bas = new JPanel();
-        bas.setBackground(Color.decode("#f5f7fb"));
-        bas.add(retour);
-        add(bas, BorderLayout.SOUTH);
+        add(panneauCentral, BorderLayout.CENTER);
+        // footer avec navigation historique
         add(new FooterPatient(fenetre, patient, "historique"), BorderLayout.SOUTH);
     }
 
+    /**
+     * Affiche une boîte de dialogue pour noter un rendez-vous passé.
+     *
+     * @return la note choisie (1-5) ou 0 si annulé
+     */
     private int demanderNote() {
         String[] options = {"1", "2", "3", "4", "5"};
-        int choix = JOptionPane.showOptionDialog(null,
+        int choix = JOptionPane.showOptionDialog(
+                this,
                 "Notez ce rendez-vous :",
                 "Évaluation",
                 JOptionPane.DEFAULT_OPTION,
                 JOptionPane.PLAIN_MESSAGE,
                 null,
                 options,
-                options[4]);
+                options[4]
+        );
         return (choix >= 0) ? choix + 1 : 0;
     }
-
 }
